@@ -122,6 +122,8 @@ async def cmd_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if char:
         add_player_to_session(session["id"], user.id, char["hp_max"], char["mana_max"])
 
+    players = get_session_players(session["id"])
+
     await update.message.reply_text("⏳ A gerar o prólogo da história...")
 
     result = await generate_prologue(chat.id, session, players)
