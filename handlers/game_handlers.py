@@ -387,8 +387,7 @@ async def _send_narration_msg(message, session, result, players, is_prologue=Fal
     turn_text = f"📖 <b>Turno {session['current_turn']}/20</b>" if not is_prologue else "📖 <b>Prólogo</b>"
 
     weather_line = format_weather_status(session.get("weather","sol"), session.get("time_of_day","dia"))
-    weather_line = format_weather_status(session.get("weather", "sol"), session.get("time_of_day", "dia"))
-
+    
     full_text = f"{turn_text}\n{weather_line}\n\n{narration}"
 
     if current and not is_prologue:
