@@ -20,7 +20,7 @@ from game.combat import calculate_damage, calculate_enemy_damage, roll_dice, all
 from game.weather import format_weather_status, get_next_time, apply_weather_to_stats
 from game.events import trigger_global_event, get_active_event_effects, generate_secret_objective
 from game.guild import add_guild_xp
-from db.database import db_get, db_run
+from db.database import db_get, db_run, db_all
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +79,16 @@ async def cmd_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     session = get_active_session(chat.id)
     if not session:
-        await update.message.reply_text("❌ Não há nenhuma história aberta. Aguarda que alguém use /new_game.")
+        await update.message.reply_text("❌ Não há nenhuma história ativa. Aguarda que alguém use /new_game.")
         return
-    if session["status"] != "waiting":
-        await update.message.reply_text("❌ A história já começou. Não podes entrar agora.")
+
+    # Verifica se já morreu nesta sessão
+    sp = db_get(
+        "SELECT * FROM session_players WHERE session_id=? AND telegram_id=?",
+        (session["id"], user.id)
+    )
+    if sp and not sp["is_alive"]:
+        await update.message.reply_text("☠️ Já morreste nesta história e não podes voltar a entrar.")
         return
 
     joined = add_player_to_session(session["id"], user.id, char["hp_max"], char["mana_max"])
@@ -91,9 +97,10 @@ async def cmd_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     players = get_session_players(session["id"])
+    status = "em curso" if session["status"] == "active" else "à espera"
     await update.message.reply_text(
-        f"✅ <b>{char['name']}</b> entrou na história!\n"
-        f"Jogadores: {len(players)} — Aguarda o /begin do owner.",
+        f"✅ <b>{char['name']}</b> entrou na história ({status})!\n"
+        f"Jogadores: {len(players)}",
         parse_mode=ParseMode.HTML
     )
 
@@ -108,17 +115,13 @@ async def cmd_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Não há sessão à espera.")
         return
 
-    # Só quem criou a sessão ou o owner pode começar
-    if session["created_by"] != user.id and user.id != OWNER_ID:
-        await update.message.reply_text("❌ Só quem criou a história pode iniciar a narração.")
-        return
-
-    players = get_session_players(session["id"])
-    if not players:
-        await update.message.reply_text("❌ Nenhum jogador entrou ainda. Aguarda /join.")
-        return
-
     start_session(session["id"])
+
+    # Junta automaticamente quem usou /begin se ainda não estiver na sessão
+    char = get_character(user.id)
+    if char:
+        add_player_to_session(session["id"], user.id, char["hp_max"], char["mana_max"])
+
     await update.message.reply_text("⏳ A gerar o prólogo da história...")
 
     result = await generate_prologue(chat.id, session, players)
