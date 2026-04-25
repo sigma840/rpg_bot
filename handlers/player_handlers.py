@@ -52,15 +52,22 @@ async def cmd_create_character(update: Update, context: ContextTypes.DEFAULT_TYP
     get_or_create_player(user.id, user.username or "", user.full_name or "")
     char = get_character(user.id)
 
+    message = update.message or (update.callback_query.message if update.callback_query else None)
+    if not message:
+        return
+
+    if update.callback_query:
+        await update.callback_query.answer()
+
     if char:
-        await update.message.reply_text(
+        await message.reply_text(
             f"⚠️ Já tens o personagem <b>{char['name']}</b>.\n"
             "Se continuares, manterás XP, nível, ouro e itens mas mudarás raça, classe e avatar.\n\n"
             "Escreve o <b>novo nome</b> do teu personagem para continuar, ou /cancel para desistir.",
             parse_mode=ParseMode.HTML
         )
     else:
-        await update.message.reply_text(
+        await message.reply_text(
             "⚔️ <b>Criação de Personagem</b>\n\nEscreve o <b>nome</b> do teu personagem:",
             parse_mode=ParseMode.HTML
         )
