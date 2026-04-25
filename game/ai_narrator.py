@@ -14,16 +14,7 @@ _last_call: dict = {}
 
 
 def _check_rate_limit(chat_id: int) -> bool:
-    now = time.time()
-    calls = _call_log.get(chat_id, [])
-    calls = [t for t in calls if now - t < 3600]
-    _call_log[chat_id] = calls
-    last = _last_call.get(chat_id, 0)
-    if now - last < AI_CALL_COOLDOWN_SECONDS:
-        return False
-    if len(calls) >= MAX_AI_CALLS_PER_HOUR:
-        return False
-    return True
+    return True  # Rate limit desativado
 
 
 def _record_call(chat_id: int):
