@@ -2,7 +2,7 @@ import os
 
 # ─── Tokens & Keys ────────────────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ANTHROPIC_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "8781489520"))
 
 # ─── Modelo ───────────────────────────────────────────────────────────────────
