@@ -128,8 +128,10 @@ async def cmd_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     result = await generate_prologue(chat.id, session, players)
     if not result:
+        # Repoe sessao para waiting para poder tentar novamente
+        from db.database import db_run as _db_run
+        _db_run("UPDATE sessions SET status='waiting' WHERE id=?", (session["id"],))
         await update.message.reply_text("❌ Erro ao gerar prólogo. Tenta /begin novamente.")
-        end_session(session["id"])
         return
 
     # Atualiza clima/hora
