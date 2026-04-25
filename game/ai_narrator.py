@@ -2,17 +2,23 @@ import asyncio
 import time
 import json
 import logging
-import urllib.request
-import urllib.error
+from groq import Groq
 from config import GROQ_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
 
 logger = logging.getLogger(__name__)
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
 _call_log: dict = {}
 _last_call: dict = {}
+_groq_client = None
+
+
+def _get_client():
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _groq_client
 
 
 def _check_rate_limit(chat_id: int) -> bool:
@@ -27,38 +33,25 @@ def _record_call(chat_id: int):
 
 def _call_groq(prompt: str, max_tokens: int = 900) -> str | None:
     esperas = [5, 15, 30]
+    client = _get_client()
     for tentativa in range(3):
         try:
-            payload = json.dumps({
-                "model": GROQ_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens,
-                "temperature": 0.9
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                GROQ_URL,
-                data=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {GROQ_API_KEY}"
-                },
-                method="POST"
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=0.9
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data["choices"][0]["message"]["content"]
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
+            return response.choices[0].message.content
+        except Exception as e:
+            code = getattr(e, 'status_code', None)
+            if code == 429:
                 espera = esperas[tentativa]
                 logger.warning("Groq 429 - limite atingido. Tentativa %d/3. A aguardar %ds...", tentativa + 1, espera)
                 time.sleep(espera)
             else:
-                body = e.read().decode("utf-8", errors="ignore")
-                logger.error("Erro Groq API (HTTP %d): %s | Body: %s | Key primeiros 8 chars: [%s]", e.code, e, body, GROQ_API_KEY[:8] if GROQ_API_KEY else "VAZIA")
+                logger.error("Erro Groq API: %s", e)
                 return None
-        except Exception as e:
-            logger.error("Erro Groq API: %s", e)
-            return None
     logger.error("Groq falhou após 3 tentativas.")
     return None
 
