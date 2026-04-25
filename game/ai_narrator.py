@@ -4,18 +4,19 @@ import json
 import logging
 import urllib.request
 import urllib.error
-from config import GEMINI_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
+from config import GROQ_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
 
 logger = logging.getLogger(__name__)
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 _call_log: dict = {}
 _last_call: dict = {}
 
 
 def _check_rate_limit(chat_id: int) -> bool:
-    return True  # Rate limit desativado
+    return True
 
 
 def _record_call(chat_id: int):
@@ -24,31 +25,40 @@ def _record_call(chat_id: int):
     _last_call[chat_id] = now
 
 
-def _call_gemini(prompt: str, max_tokens: int = 900) -> str | None:
-    esperas = [5, 15, 30]  # segundos de espera entre tentativas
+def _call_groq(prompt: str, max_tokens: int = 900) -> str | None:
+    esperas = [5, 15, 30]
     for tentativa in range(3):
         try:
-            url = GEMINI_URL.format(key=GEMINI_API_KEY)
             payload = json.dumps({
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.9}
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": 0.9
             }).encode("utf-8")
-            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            req = urllib.request.Request(
+                GROQ_URL,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {GROQ_API_KEY}"
+                },
+                method="POST"
+            )
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                return data["choices"][0]["message"]["content"]
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 espera = esperas[tentativa]
-                logger.warning("Gemini 429 - limite atingido. Tentativa %d/3. A aguardar %ds...", tentativa + 1, espera)
+                logger.warning("Groq 429 - limite atingido. Tentativa %d/3. A aguardar %ds...", tentativa + 1, espera)
                 time.sleep(espera)
             else:
-                logger.error("Erro Gemini API (HTTP %d): %s", e.code, e)
+                logger.error("Erro Groq API (HTTP %d): %s", e.code, e)
                 return None
         except Exception as e:
-            logger.error("Erro Gemini API: %s", e)
+            logger.error("Erro Groq API: %s", e)
             return None
-    logger.error("Gemini falhou após 3 tentativas (429 persistente).")
+    logger.error("Groq falhou após 3 tentativas.")
     return None
 
 
@@ -130,7 +140,7 @@ ACAO ({players[0].get('char_name','?') if players else '?'}): {action_taken}
 Responde APENAS com JSON valido."""
 
     loop = asyncio.get_event_loop()
-    raw = await loop.run_in_executor(None, lambda: _call_gemini(prompt))
+    raw = await loop.run_in_executor(None, lambda: _call_groq(prompt))
     _record_call(chat_id)
     return _parse_json(raw)
 
@@ -153,7 +163,7 @@ events deve ter: {{"weather_change":null,"time_change":"dia","xp_gained":0,"gold
 Responde APENAS com JSON valido."""
 
     loop = asyncio.get_event_loop()
-    raw = await loop.run_in_executor(None, lambda: _call_gemini(prompt, max_tokens=1000))
+    raw = await loop.run_in_executor(None, lambda: _call_groq(prompt, max_tokens=1000))
     _record_call(chat_id)
     return _parse_json(raw)
 
@@ -167,14 +177,14 @@ async def generate_epilogue(chat_id: int, session: dict, players: list, full_log
 
     prompt = f"""Es um narrador epico de RPG. Escreves epilogos dramaticos em Portugues de Portugal.
 
-Cria um epilogo epico com narração dramatica do fim (~150 palavras) e um paragrafo para cada jogador com o seu momento mais epico.
+Cria um epilogo epico com narracao dramatica do fim (~150 palavras) e um paragrafo para cada jogador com o seu momento mais epico.
 Usa tags HTML <b> e <i> para formatacao Telegram.
 
 JOGADORES: {json.dumps(players_info, ensure_ascii=False)}
 MOMENTOS: {json.dumps(full_log[-5:] if len(full_log) > 5 else full_log, ensure_ascii=False)}"""
 
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, lambda: _call_gemini(prompt, max_tokens=1000))
+    result = await loop.run_in_executor(None, lambda: _call_groq(prompt, max_tokens=1000))
     _record_call(chat_id)
     return result
 
@@ -190,7 +200,7 @@ Faz sentido em fantasia medieval?
 {{"valid":true,"reason":"...","result_name":"...","new_effect":"...","atk_bonus":0,"element":""}}"""
 
     loop = asyncio.get_event_loop()
-    raw = await loop.run_in_executor(None, lambda: _call_gemini(prompt, max_tokens=200))
+    raw = await loop.run_in_executor(None, lambda: _call_groq(prompt, max_tokens=200))
     _record_call(chat_id)
     return _parse_json(raw)
 
@@ -205,7 +215,7 @@ Gera evento global para o reino (positivo ou negativo):
 {"title":"...","description":"anuncio dramatico ~80 palavras","effect":{"hp_mod":0,"mana_mod":0,"xp_mult":1.0,"gold_mult":1.0,"description":"..."},"duration_hours":24}"""
 
     loop = asyncio.get_event_loop()
-    raw = await loop.run_in_executor(None, lambda: _call_gemini(prompt, max_tokens=300))
+    raw = await loop.run_in_executor(None, lambda: _call_groq(prompt, max_tokens=300))
     _record_call(chat_id)
     return _parse_json(raw)
 
