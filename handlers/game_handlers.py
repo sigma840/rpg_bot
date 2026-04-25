@@ -34,10 +34,6 @@ async def cmd_new_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Usa este comando num grupo do Telegram!")
         return
 
-    if user.id != OWNER_ID:
-        await update.message.reply_text("❌ Só o dono do bot pode iniciar histórias.")
-        return
-
     existing = get_active_session(chat.id)
     if existing:
         await update.message.reply_text("❌ Já há uma história ativa. Usa /end_game primeiro.")
@@ -107,13 +103,14 @@ async def cmd_begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat = update.effective_chat
 
-    if user.id != OWNER_ID:
-        await update.message.reply_text("❌ Só o owner pode iniciar a narração.")
-        return
-
     session = get_active_session(chat.id)
     if not session or session["status"] != "waiting":
         await update.message.reply_text("❌ Não há sessão à espera.")
+        return
+
+    # Só quem criou a sessão ou o owner pode começar
+    if session["created_by"] != user.id and user.id != OWNER_ID:
+        await update.message.reply_text("❌ Só quem criou a história pode iniciar a narração.")
         return
 
     players = get_session_players(session["id"])
