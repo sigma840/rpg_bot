@@ -2,11 +2,8 @@ import os
 
 # ─── Tokens & Keys ────────────────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "8781489520"))
-
-# ─── Modelo ───────────────────────────────────────────────────────────────────
-ANTHROPIC_MODEL = "claude-3-5-haiku-20241022"  # Mais barato, rápido e suficiente
 
 # ─── Jogo ─────────────────────────────────────────────────────────────────────
 MAX_TURNS = 20
@@ -25,7 +22,7 @@ REVIVE_GOLD_COST = 50
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}?width=768&height=432&nologo=true"
 IMAGE_ENABLED = True  # Muda para False se quiseres desativar imagens globalmente
 
-# ─── Rate Limiting (Anthropic) ────────────────────────────────────────────────
+# ─── Rate Limiting (Groq) ────────────────────────────────────────────────────
 MAX_AI_CALLS_PER_HOUR = 60  # Limite por grupo por hora
 AI_CALL_COOLDOWN_SECONDS = 5  # Mínimo entre chamadas
 
