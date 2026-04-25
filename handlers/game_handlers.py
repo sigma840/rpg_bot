@@ -386,7 +386,7 @@ async def _send_narration_msg(message, session, result, players, is_prologue=Fal
     current = get_current_player(session)
     turn_text = f"📖 <b>Turno {session['current_turn']}/20</b>" if not is_prologue else "📖 <b>Prólogo</b>"
 
-    weather_line = format_weather_status(session.get("weather","sol"), session.get("time_of_day","dia"))
+    weather_line = format_weather_status(session.get("weather", "sol"), session.get("time_of_day", "dia"))
 
     full_text = f"{turn_text}\n{weather_line}\n\n{narration}"
 
@@ -399,30 +399,23 @@ async def _send_narration_msg(message, session, result, players, is_prologue=Fal
         for i, opt in enumerate(options[:4]):
             keyboard.append([InlineKeyboardButton(opt[:64], callback_data=f"action_{opt[:50]}")])
 
-    # Tenta gerar imagem
-    img_bytes = None
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+
+    # Gera imagem da cena
     if image_prompt:
         try:
             img_bytes = await generate_image(image_prompt, seed=session.get("current_turn", 1))
+            if img_bytes:
+                await message.reply_photo(photo=img_bytes)
         except Exception as e:
             logger.warning("Erro ao gerar imagem do turno: %s", e)
 
-    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-
+    # Envia texto + botões separadamente
     try:
-        if img_bytes:
-            await message.reply_photo(
-                photo=img_bytes,
-                caption=full_text,
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await message.reply_text(full_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        await message.reply_text(full_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.error("Erro ao enviar narração: %s", e)
         await message.reply_text(narration, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
 
 async def _finish_story(update, context, session, players, message):
     end_session(session["id"])
