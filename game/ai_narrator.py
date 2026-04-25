@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import urllib.request
+import urllib.error
 from config import GEMINI_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -24,19 +25,31 @@ def _record_call(chat_id: int):
 
 
 def _call_gemini(prompt: str, max_tokens: int = 900) -> str | None:
-    try:
-        url = GEMINI_URL.format(key=GEMINI_API_KEY)
-        payload = json.dumps({
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.9}
-        }).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        logger.error("Erro Gemini API: %s", e)
-        return None
+    esperas = [5, 15, 30]  # segundos de espera entre tentativas
+    for tentativa in range(3):
+        try:
+            url = GEMINI_URL.format(key=GEMINI_API_KEY)
+            payload = json.dumps({
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.9}
+            }).encode("utf-8")
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                espera = esperas[tentativa]
+                logger.warning("Gemini 429 - limite atingido. Tentativa %d/3. A aguardar %ds...", tentativa + 1, espera)
+                time.sleep(espera)
+            else:
+                logger.error("Erro Gemini API (HTTP %d): %s", e.code, e)
+                return None
+        except Exception as e:
+            logger.error("Erro Gemini API: %s", e)
+            return None
+    logger.error("Gemini falhou após 3 tentativas (429 persistente).")
+    return None
 
 
 NARRATOR_SYSTEM = """Es o narrador de um jogo RPG de fantasia num grupo Telegram, em Portugues de Portugal.
