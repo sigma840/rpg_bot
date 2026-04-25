@@ -9,7 +9,7 @@ from config import GROQ_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
 logger = logging.getLogger(__name__)
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama3-8b-8192"
 
 _call_log: dict = {}
 _last_call: dict = {}
