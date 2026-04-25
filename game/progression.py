@@ -88,7 +88,7 @@ def toggle_spell(telegram_id: int, spell_id: int) -> bool:
         db_run("UPDATE spells SET is_active=0 WHERE id=?", (spell_id,))
     else:
         count = db_get("SELECT COUNT(*) as cnt FROM spells WHERE telegram_id=? AND is_active=1", (telegram_id,))
-        if count and count["cnt"] >= MAX_SPELLS else False:
+        if count and count["cnt"] >= MAX_SPELLS:
             return False
         db_run("UPDATE spells SET is_active=1 WHERE id=?", (spell_id,))
     return True
