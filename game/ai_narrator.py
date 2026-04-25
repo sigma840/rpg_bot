@@ -47,14 +47,15 @@ def _call_groq(prompt: str, max_tokens: int = 900) -> str | None:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 return data["choices"][0]["message"]["content"]
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                espera = esperas[tentativa]
-                logger.warning("Groq 429 - limite atingido. Tentativa %d/3. A aguardar %ds...", tentativa + 1, espera)
-                time.sleep(espera)
-            else:
-                logger.error("Erro Groq API (HTTP %d): %s", e.code, e)
-                return None
+except urllib.error.HTTPError as e:
+    if e.code == 429:
+        espera = esperas[tentativa]
+        logger.warning("Groq 429 - limite atingido. Tentativa %d/3. A aguardar %ds...", tentativa + 1, espera)
+        time.sleep(espera)
+    else:
+        body = e.read().decode("utf-8", errors="ignore")
+        logger.error("Erro Groq API (HTTP %d): %s | Body: %s | Key primeiros 8 chars: %s", e.code, e, body, GROQ_API_KEY[:8] if GROQ_API_KEY else "VAZIA")
+        return None
         except Exception as e:
             logger.error("Erro Groq API: %s", e)
             return None
