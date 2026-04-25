@@ -21,13 +21,14 @@ async def cmd_end_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Só o owner pode terminar histórias.")
         return
 
-    session = get_active_session(update.effective_chat.id)
+    from db.database import db_get as _db_get, db_run as _db_run
+    session = _db_get("SELECT * FROM sessions WHERE chat_id=? AND status != 'ended' ORDER BY id DESC LIMIT 1", (update.effective_chat.id,))
     if not session:
         await update.message.reply_text("❌ Não há história ativa.")
         return
 
-    end_session(session["id"])
-    await update.message.reply_text("🛑 História terminada pelo owner.")
+    _db_run("UPDATE sessions SET status='ended' WHERE id=?", (session["id"],))
+    await update.message.reply_text("🛑 História terminada.")
 
 
 # ─── Admin: /announce ─────────────────────────────────────────────────────────
