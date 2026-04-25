@@ -3,7 +3,7 @@ import time
 import json
 import logging
 import urllib.request
-from config import ANTHROPIC_API_KEY as GEMINI_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
+from config import GEMINI_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
 
 logger = logging.getLogger(__name__)
 
