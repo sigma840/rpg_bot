@@ -7,7 +7,7 @@ from config import ANTHROPIC_API_KEY as GEMINI_API_KEY, MAX_AI_CALLS_PER_HOUR, A
 
 logger = logging.getLogger(__name__)
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
 
 _call_log: dict = {}
 _last_call: dict = {}
