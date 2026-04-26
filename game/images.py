@@ -7,52 +7,59 @@ from config import IMAGE_ENABLED
 
 logger = logging.getLogger(__name__)
 
-# Modelo flux é mais rápido e estável no Pollinations
-POLLINATIONS_BASE = "https://image.pollinations.ai/prompt/{prompt}?width=768&height=432&nologo=true&seed={seed}&model=flux&enhance=false"
+# Usa o endpoint de API oficial do Pollinations que é mais estável
+POLLINATIONS_BASE = "https://image.pollinations.ai/prompt/{prompt}?width=768&height=432&nologo=true&seed={seed}&model=flux"
 
-# Rate limiting simples — guarda o timestamp do último pedido
+_request_lock = asyncio.Lock()
 _last_request_time: float = 0.0
-_MIN_INTERVAL = 4.0  # segundos entre pedidos para não dar 429
+_MIN_INTERVAL = 6.0  # segundos mínimos entre pedidos
 
 
 async def generate_image(prompt: str, seed: int = 42) -> bytes | None:
-    """Gera imagem via Pollinations.AI com rate limiting."""
+    """Gera imagem via Pollinations.AI com fila serializada para evitar 429."""
     if not IMAGE_ENABLED:
         return None
 
     global _last_request_time
 
-    # Espera se necessário para respeitar o rate limit
-    now = time.monotonic()
-    elapsed = now - _last_request_time
-    if elapsed < _MIN_INTERVAL:
-        await asyncio.sleep(_MIN_INTERVAL - elapsed)
+    async with _request_lock:
+        # Espera o intervalo mínimo
+        now = time.monotonic()
+        elapsed = now - _last_request_time
+        if elapsed < _MIN_INTERVAL:
+            await asyncio.sleep(_MIN_INTERVAL - elapsed)
 
-    encoded = quote(prompt[:300])
-    url = POLLINATIONS_BASE.format(prompt=encoded, seed=seed % 99999)
+        encoded = quote(prompt[:250])
+        url = POLLINATIONS_BASE.format(prompt=encoded, seed=abs(seed) % 99999)
 
-    try:
-        _last_request_time = time.monotonic()
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=45)) as resp:
-                if resp.status == 200:
-                    data = await resp.read()
-                    if len(data) > 1000:  # verifica que é uma imagem real
-                        return data
-                    logger.warning("Pollinations devolveu resposta vazia")
-                    return None
-                elif resp.status == 429:
-                    logger.warning("Pollinations 429 — rate limit atingido, a aguardar...")
-                    await asyncio.sleep(8)
-                    return None
-                else:
-                    logger.warning("Pollinations devolveu status %s", resp.status)
-                    return None
-    except asyncio.TimeoutError:
-        logger.warning("Timeout ao gerar imagem Pollinations")
-        return None
-    except Exception as e:
-        logger.error("Erro ao gerar imagem: %s", e)
+        for tentativa in range(2):
+            try:
+                _last_request_time = time.monotonic()
+                timeout = aiohttp.ClientTimeout(total=50, connect=10)
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=timeout) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            if len(data) > 5000:  # imagem real tem pelo menos 5KB
+                                return data
+                            logger.warning("Pollinations: resposta muito pequena (%d bytes)", len(data))
+                            return None
+                        elif resp.status == 429:
+                            logger.warning("Pollinations 429 na tentativa %d", tentativa + 1)
+                            await asyncio.sleep(10)
+                            continue
+                        else:
+                            logger.warning("Pollinations status %s", resp.status)
+                            return None
+            except asyncio.TimeoutError:
+                logger.warning("Pollinations timeout (tentativa %d)", tentativa + 1)
+                if tentativa == 0:
+                    await asyncio.sleep(3)
+                continue
+            except Exception as e:
+                logger.error("Erro ao gerar imagem: %s", e)
+                return None
+
         return None
 
 
