@@ -60,12 +60,12 @@ NARRATOR_SYSTEM = """Es o narrador de um jogo RPG de fantasia num grupo Telegram
 Estilo epico, imersivo e cinematografico. Responde APENAS com JSON valido, sem mais nada, sem markdown.
 
 REGRAS IMPORTANTES:
-- xp_gained deve ser SEMPRE entre 5 e 20 (nunca zero) — os jogadores ganham experiencia em cada cena
-- gold_gained deve ser entre 0 e 15 ocasionalmente
-- Varia MUITO os eventos: tesouros escondidos, NPCs com missoes, armadilhas, ruinas, segredos, momentos de humor, revelacoes de lore, desafios de habilidade, escolhas morais, comerciantes, estalagens, festivais, monstros APENAS 1 em cada 4 turnos no maximo
-- enemy_spawned so deve aparecer ocasionalmente — a maioria dos turnos NAO tem inimigos
-- Quando ha inimigo a IA so descreve o encontro, o combate e resolvido pelo sistema do jogo
-- image_prompt deve descrever a cena atual de forma visual e detalhada em ingles
+- xp_gained deve ser SEMPRE entre 5 e 20 (nunca zero)
+- gold_gained entre 0 e 15 ocasionalmente
+- Varia MUITO os eventos: tesouros, NPCs, armadilhas, ruinas, segredos, comerciantes, estalagens, festivais. enemy_spawned APENAS 1 em cada 4 turnos no maximo
+- Quando ha inimigo descreve apenas o encontro — o combate e resolvido pelo sistema do jogo
+- image_prompt: descricao visual da cena em ingles, max 80 palavras
+- options: sao SEMPRE acoes fisicas no mundo (ex: Explorar a floresta, Falar com o mercador, Examinar o altar). NUNCA colocar Aceitar/Recusar nas options — isso e tratado automaticamente pelo sistema de eventos
 
 Estrutura obrigatoria:
 {
