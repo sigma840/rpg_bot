@@ -8,6 +8,7 @@ from config import GROQ_API_KEY, MAX_AI_CALLS_PER_HOUR, AI_CALL_COOLDOWN_SECONDS
 logger = logging.getLogger(__name__)
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL_FAST = "llama-3.1-8b-instant"  # fallback com menos rate limit
 
 _call_log: dict = {}
 _last_call: dict = {}
@@ -32,45 +33,62 @@ def _record_call(chat_id: int):
 
 
 def _call_groq(prompt: str, max_tokens: int = 900) -> str | None:
-    esperas = [5, 15, 30]
     client = _get_client()
-    for tentativa in range(3):
-        try:
-            response = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=0.9
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            code = getattr(e, 'status_code', None)
-            if code == 429:
-                espera = esperas[tentativa]
-                logger.warning("Groq 429 - limite atingido. Tentativa %d/3. A aguardar %ds...", tentativa + 1, espera)
-                time.sleep(espera)
-            else:
-                logger.error("Erro Groq API: %s", e)
-                return None
-    logger.error("Groq falhou após 3 tentativas.")
+    # Tenta primeiro o modelo principal, depois o fallback
+    models_to_try = [GROQ_MODEL, GROQ_MODEL_FAST]
+    for model in models_to_try:
+        esperas = [8, 20, 45]
+        for tentativa in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=0.9
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                code = getattr(e, 'status_code', None)
+                if code == 429:
+                    if tentativa < 2:
+                        espera = esperas[tentativa]
+                        logger.warning("Groq 429 (%s) - Tentativa %d/3. A aguardar %ds...", model, tentativa + 1, espera)
+                        time.sleep(espera)
+                    else:
+                        logger.warning("Groq 429 (%s) - esgotado, a tentar modelo fallback.", model)
+                        break  # tenta o próximo modelo
+                else:
+                    logger.error("Erro Groq API (%s): %s", model, e)
+                    return None
+    logger.error("Groq falhou em todos os modelos.")
     return None
 
 
 NARRATOR_SYSTEM = """Es o narrador de um jogo RPG de fantasia num grupo Telegram, em Portugues de Portugal.
 Estilo epico, imersivo e cinematografico. Responde APENAS com JSON valido, sem mais nada, sem markdown.
 
-REGRAS IMPORTANTES:
-- xp_gained deve ser SEMPRE entre 5 e 20 (nunca zero)
+REGRAS CRITICAS DE VARIEDADE — LER COM ATENCAO:
+- NUNCA repitas o mesmo tipo de cena duas vezes seguidas. Se o turno anterior foi explorar floresta, o proximo e diferente.
+- RODA obrigatoriamente por estes tipos de cena (escolhe baseado no turno e historia):
+  * ENCONTRO NPC: mercador ambulante, bardo numa estalagem, feiticeiro ermita, nobre fugitivo, crianca perdida, guarda corrupto, druida misterioso, fantasma de guerreiro, ladrao arrependido
+  * LUGAR ESPECIAL: ruinas antigas, torre abandonada, aldeia assombrada, lago encantado, caverna de cristais, altar pagao, cemiterio esquecido, ponte sobre abismo, mercado movimentado, estalagem animada
+  * EVENTO ALEATORIO: tempestade repentina, terremoto menor, chuva de estrelas, aparicao de criatura rara, festival de aldeia, conflito entre NPCs, mensageiro com carta urgente, incendio numa casa, fuga de prisioneiro, descoberta de mapa
+  * ARMADILHA/PUZZLE: chao que cede, runas que brilham, porta com enigma, espelho magico que mostra o futuro, cofre com mecanismo, labirinto de setos, ilusao magica
+  * DESCANSO/SOCIAL: estalagem com historias, conversa reveladora com NPC, sonho profetico, ritual de um povo local, celebracao de aldeia, encontro com velho conhecido
+  * DESCOBERTA: tesouro escondido, diario de aventureiro morto, portal dimensional, artefacto misterioso, passagem secreta, vista deslumbrante com pista
+  * ANIMAIS/NATUREZA: alcateia de lobos, grifo ferido, unicornio assustado, dragao jovem curioso, rebanho de pegasos, planta carnivora, cogumelos gigantes magicos
+
+- COMPANHEIROS: so aparecem como companion_available quando faz narrativamente sentido (animal ferido que os jogadores salvam, animal magico que escolhe o grupo, cria de fera que ficou orfao). NAO no inicio da historia.
+- enemy_spawned MAXIMO 1 em cada 4 turnos — os outros turnos sao eventos, descobertas, NPCs, etc.
+- xp_gained SEMPRE entre 5 e 20
 - gold_gained entre 0 e 15 ocasionalmente
-- Varia MUITO os eventos: tesouros, NPCs, armadilhas, ruinas, segredos, comerciantes, estalagens, festivais. enemy_spawned APENAS 1 em cada 4 turnos no maximo
-- Quando ha inimigo descreve apenas o encontro — o combate e resolvido pelo sistema do jogo
-- image_prompt: descricao visual da cena em ingles, max 120 palavras. OBRIGATORIO incluir: aparencia visual de cada jogador presente (raca, classe, descricao fisica/equipamento do campo avatar), companheiros domados se presentes (tipo de animal, aparencia), e o contexto preciso da cena (local, atmosfera, acao em curso, clima, hora do dia). A imagem deve representar fielmente o que esta a acontecer na narration.
-- options: sao SEMPRE acoes fisicas no mundo (ex: Explorar a floresta, Falar com o mercador, Examinar o altar). NUNCA colocar Aceitar/Recusar nas options — isso e tratado automaticamente pelo sistema de eventos
+- options: SEMPRE 3-4 acoes DIFERENTES entre si e relevantes para a cena atual. NUNCA "Seguir em frente" e "Continuar o caminho" juntos — sao a mesma coisa. Cada opcao deve ser unica e interessante: uma pode ser agressiva, outra diplomatica, outra furtiva, outra magica.
+- image_prompt: descricao visual da cena em ingles, max 120 palavras. OBRIGATORIO incluir aparencia de cada jogador (raca, classe, avatar_desc/equipamento), companheiros domados se existirem (animal, aparencia), e contexto preciso da cena (local, atmosfera, acao em curso, clima, hora do dia).
 
 Estrutura obrigatoria:
 {
-  "narration": "texto narrativo ~150 palavras",
-  "options": ["opcao 1", "opcao 2", "opcao 3", "opcao 4"],
+  "narration": "texto narrativo ~150 palavras, cinematografico e imersivo",
+  "options": ["opcao 1 unica", "opcao 2 diferente", "opcao 3 diferente", "opcao 4 diferente"],
   "events": {
     "item_found": null,
     "weapon_found": null,
@@ -94,7 +112,9 @@ weapon_found: {"name":"...","rarity":"...","lore":"...","atk_bonus":0,"element":
 skill_offered: {"name":"...","description":"...","effect":{}}
 spell_offered: {"name":"...","description":"...","mana_cost":10,"element":"","effect":{}}
 enemy_spawned: {"name":"...","hp":50,"atk":10,"def":5,"element":"","weakness":"","is_boss":false,"is_miniboss":false,"behaviors":[]}
-companion_available: {"name":"...","animal_type":"...","hp":50,"atk":8,"def":4,"special":"...","description":"..."}"""
+companion_available: {"name":"...","animal_type":"...","hp":50,"atk":8,"def":4,"special":"...","description":"..."}
+npc_met: {"name":"...","role":"...","personality":"...","has_quest":false,"dialogue":"fala inicial do NPC"}
+secret_event: {"type":"...","description":"...","effect":{}}"""
 
 
 def _parse_json(raw: str) -> dict | None:
@@ -146,10 +166,11 @@ async def generate_turn(chat_id: int, session: dict, players: list, action_taken
 TURNO: {session.get('current_turn',1)}/20 | DIFICULDADE: {session.get('difficulty','normal')} | CLIMA: {session.get('weather','sol')} | HORA: {session.get('time_of_day','dia')}
 JOGADORES: {json.dumps(players_info, ensure_ascii=False)}
 RESUMO: {session.get('story_summary','A aventura comeca agora.')}
+ULTIMO_EVENTO_TIPO: {session.get('last_event_type','nenhum')} — NAO repitas este tipo de evento/cena agora.
 ACAO ({players[0].get('char_name','?') if players else '?'}): {action_taken}
 {f'COMBATE: {json.dumps(combat_result, ensure_ascii=False)}' if combat_result else ''}
-{'ATENCAO: Aproxima-te do climax.' if session.get('current_turn',1) >= 15 else ''}
-{'ATENCAO: Prepara o epilogo.' if session.get('current_turn',1) >= 18 else ''}
+{'ATENCAO: Aproxima-te do climax. Cria tensao maxima.' if session.get('current_turn',1) >= 15 else ''}
+{'ATENCAO: Prepara o epilogo. Resolve os fios da historia.' if session.get('current_turn',1) >= 18 else ''}
 
 Responde APENAS com JSON valido."""
 
@@ -163,24 +184,19 @@ async def generate_prologue(chat_id: int, session: dict, players: list) -> dict 
     if not _check_rate_limit(chat_id):
         return None
 
-    from game.progression import get_companions
-    players_info = []
-    for p in players:
-        companions = get_companions(p.get("telegram_id", 0))
-        comp_str = ", ".join([f"{c['name']} ({c['animal_type']})" for c in companions]) if companions else ""
-        entry = f"{p.get('char_name','?')} ({p.get('race','?')} {p.get('class','?')}): {p.get('avatar_desc','')}"
-        if comp_str:
-            entry += f" | Companheiros: {comp_str}"
-        players_info.append(entry)
+    # No prologo os jogadores NAO tem companheiros — estes so sao domados durante a historia
+    players_info = [f"{p.get('char_name','?')} ({p.get('race','?')} {p.get('class','?')}): {p.get('avatar_desc','')}" for p in players]
 
     prompt = f"""{NARRATOR_SYSTEM}
 
 Cria o prologo epico de uma nova aventura RPG em Portugues de Portugal.
 DIFICULDADE: {session.get('difficulty','normal')}
-JOGADORES: {json.dumps(players_info, ensure_ascii=False)}
+JOGADORES (SEM companheiros no inicio): {json.dumps(players_info, ensure_ascii=False)}
 
-Responde com JSON onde narration tem ~200 palavras de prologo epico, options tem 3 opcoes para comecar, e image_prompt descreve a cena de abertura em ingles.
-events deve ter: {{"weather_change":null,"time_change":"dia","xp_gained":0,"gold_gained":0,"item_found":null,"weapon_found":null,"skill_offered":null,"spell_offered":null,"enemy_spawned":null,"companion_available":null,"dungeon_room":null,"secret_event":null,"npc_met":null}}
+Narration ~200 palavras: prologo cinematografico que estabelece o mundo, o perigo e o chamado a aventura. Termina com os jogadores numa situacao inicial interessante (NAO apenas "estao na estrada").
+Options: 3 primeiras acoes possiveis bem diferentes entre si.
+image_prompt: cena de abertura epica com os jogadores descritos.
+events: {{"weather_change":null,"time_change":"dia","xp_gained":0,"gold_gained":0,"item_found":null,"weapon_found":null,"skill_offered":null,"spell_offered":null,"enemy_spawned":null,"companion_available":null,"dungeon_room":null,"secret_event":null,"npc_met":null}}
 
 Responde APENAS com JSON valido."""
 
