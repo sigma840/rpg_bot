@@ -205,7 +205,7 @@ async def callback_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _send_narration_msg(query.message, session, result, players, turn_summary=turn_summary)
 
 
-# ─── MINI-SISTEMA DE COMBATE ──────────────────────────────────────────────────
+# ─── MINI-SISTEMA DE COMBATE (MULTIPLAYER) ───────────────────────────────────
 
 def _make_bar(current: int, maximum: int, length: int = 10) -> str:
     if maximum <= 0:
@@ -214,39 +214,52 @@ def _make_bar(current: int, maximum: int, length: int = 10) -> str:
     return "█" * filled + "░" * (length - filled)
 
 
-def _combat_status_text(user_id: int, session: dict, enemy: dict) -> str:
-    char = get_character(user_id)
-    sp = db_get(
-        "SELECT hp_current, mana_current FROM session_players WHERE session_id=? AND telegram_id=?",
-        (session["id"], user_id)
-    )
-    hp_atual = sp["hp_current"] if sp else char["hp_max"]
-    mana_atual = sp["mana_current"] if sp else 0
+def _combat_status_text(session: dict, enemy: dict, players_data: list, current_turn_player_id: int = None) -> str:
+    """Painel de combate partilhado mostrando todos os jogadores + inimigo."""
     enemy_hp = enemy.get("hp", 50)
     enemy_hp_max = enemy.get("hp_max", enemy_hp)
-
-    hp_bar = _make_bar(hp_atual, char["hp_max"], 10)
     enemy_bar = _make_bar(enemy_hp, enemy_hp_max, 10)
 
     tag = "💀 BOSS" if enemy.get("is_boss") else ("⚠️ Mini-Boss" if enemy.get("is_miniboss") else "👹")
-    text = (
-        f"⚔️ <b>COMBATE</b>\n\n"
-        f"<b>{char['name']}</b>\n"
-        f"❤️ {hp_atual}/{char['hp_max']} {hp_bar}\n"
-        f"💧 {mana_atual}/{char['mana_max']} MANA\n\n"
-        f"{tag} <b>{enemy['name']}</b>\n"
-        f"❤️ {enemy_hp}/{enemy_hp_max} {enemy_bar}\n"
-        f"⚔️ ATK {enemy['atk']} | 🛡️ DEF {enemy.get('def', 5)}"
-    )
+
+    lines = [f"⚔️ <b>COMBATE EM GRUPO</b>\n"]
+
+    # Mostra todos os jogadores
+    for p in players_data:
+        char = get_character(p["telegram_id"])
+        if not char:
+            continue
+        sp = db_get(
+            "SELECT hp_current, mana_current FROM session_players WHERE session_id=? AND telegram_id=?",
+            (session["id"], p["telegram_id"])
+        )
+        hp = sp["hp_current"] if sp else char["hp_max"]
+        mana = sp["mana_current"] if sp else 0
+        hp_bar = _make_bar(hp, char["hp_max"], 8)
+
+        alive = p.get("is_alive", 1)
+        status = "☠️" if not alive else ("▶️" if p["telegram_id"] == current_turn_player_id else "⏳")
+        lines.append(
+            f"{status} <b>{p.get('char_name', char['name'])}</b> "
+            f"❤️{hp}/{char['hp_max']} {hp_bar} 💧{mana}"
+        )
+
+    lines.append("")
+    lines.append(f"{tag} <b>{enemy['name']}</b>")
+    lines.append(f"❤️ {enemy_hp}/{enemy_hp_max} {enemy_bar}")
+    lines.append(f"⚔️ ATK {enemy['atk']} | 🛡️ DEF {enemy.get('def', 5)}")
+
     if enemy.get("element"):
-        text += f" | 🔥 {enemy['element']}"
+        lines[-1] += f" | 🔥 {enemy['element']}"
     if enemy.get("weakness"):
-        text += f"\n🎯 Fraqueza: <i>{enemy['weakness']}</i>"
-    return text
+        lines.append(f"🎯 Fraqueza: <i>{enemy['weakness']}</i>")
+    if enemy.get("enraged"):
+        lines.append("😡 <b>ENFURECIDO!</b>")
+
+    return "\n".join(lines)
 
 
-def _build_combat_keyboard(user_id: int, enemy: dict, session_id: int) -> InlineKeyboardMarkup:
-    char = get_character(user_id)
+def _build_combat_keyboard(user_id: int, session_id: int) -> InlineKeyboardMarkup:
     skills = get_skills(user_id)
     spells = get_spells(user_id)
     companions = get_companions(user_id)
@@ -254,17 +267,16 @@ def _build_combat_keyboard(user_id: int, enemy: dict, session_id: int) -> Inline
     sp = db_get("SELECT mana_current FROM session_players WHERE session_id=? AND telegram_id=?", (session_id, user_id))
     mana_atual = sp["mana_current"] if sp else 0
 
-    keyboard = []
-    keyboard.append([InlineKeyboardButton("⚔️ Atacar", callback_data="combat_attack")])
+    keyboard = [[InlineKeyboardButton("⚔️ Atacar", callback_data="combat_attack")]]
 
-    active_skills = [s for s in skills if s.get("is_active")][:3]
+    active_skills = [s for s in skills if s.get("is_active")][:2]
     for skill in active_skills:
         keyboard.append([InlineKeyboardButton(
             f"🎯 {skill['name'][:30]}",
             callback_data=f"combat_skill_{skill['id']}"
         )])
 
-    active_spells = [s for s in spells if s.get("is_active") and s.get("mana_cost", 10) <= mana_atual][:3]
+    active_spells = [s for s in spells if s.get("is_active") and s.get("mana_cost", 10) <= mana_atual][:2]
     for spell in active_spells:
         keyboard.append([InlineKeyboardButton(
             f"✨ {spell['name'][:25]} ({spell.get('mana_cost', 10)}💧)",
@@ -274,26 +286,81 @@ def _build_combat_keyboard(user_id: int, enemy: dict, session_id: int) -> Inline
     if companions:
         comp = companions[0]
         keyboard.append([InlineKeyboardButton(
-            f"🐾 {comp['name'][:25]} (ataque conjunto)",
+            f"🐾 {comp['name'][:20]} (ataque conjunto)",
             callback_data=f"combat_companion_{comp['id']}"
         )])
 
     keyboard.append([InlineKeyboardButton("🏃 Fugir", callback_data="combat_flee")])
-
     return InlineKeyboardMarkup(keyboard)
 
 
+def _get_combat_turn_player(context, session_id: int) -> int | None:
+    """Retorna o telegram_id do jogador cujo turno é no combate."""
+    return context.chat_data.get(f"combat_turn_{session_id}")
+
+
+def _next_combat_turn(context, session_id: int, alive_players: list) -> int | None:
+    """Avança para o próximo jogador no combate. Retorna o novo current_player_id."""
+    if not alive_players:
+        return None
+    order = context.chat_data.get(f"combat_order_{session_id}", [])
+    current = context.chat_data.get(f"combat_turn_{session_id}")
+
+    if not order or set(order) != set(p["telegram_id"] for p in alive_players):
+        # Inicializa ou re-sincroniza a ordem
+        order = [p["telegram_id"] for p in alive_players]
+        context.chat_data[f"combat_order_{session_id}"] = order
+
+    if current not in order:
+        next_player = order[0]
+    else:
+        idx = order.index(current)
+        next_player = order[(idx + 1) % len(order)]
+
+    context.chat_data[f"combat_turn_{session_id}"] = next_player
+    return next_player
+
+
+def _init_combat_turn(context, session_id: int, alive_players: list) -> int | None:
+    """Inicializa o turno de combate com o primeiro jogador."""
+    if not alive_players:
+        return None
+    order = [p["telegram_id"] for p in alive_players]
+    context.chat_data[f"combat_order_{session_id}"] = order
+    context.chat_data[f"combat_turn_{session_id}"] = order[0]
+    # Rastreia quem já agiu nesta ronda
+    context.chat_data[f"combat_acted_{session_id}"] = set()
+    return order[0]
+
+
 async def _start_mini_combat(message, context, session, user_id: int, enemy: dict):
+    """Inicia o combate em grupo."""
     if "hp_max" not in enemy:
         enemy["hp_max"] = enemy.get("hp", 50)
         context.chat_data["current_enemy"] = enemy
 
-    text = _combat_status_text(user_id, session, enemy)
-    keyboard = _build_combat_keyboard(user_id, enemy, session["id"])
+    players = get_session_players(session["id"])
+    alive_players = [p for p in players if p.get("is_alive", 1)]
+
+    # Inicializa turno do primeiro jogador
+    first_player_id = _init_combat_turn(context, session["id"], alive_players)
+
+    first_char = get_character(first_player_id) if first_player_id else None
+    first_name = first_char["name"] if first_char else "?"
+
+    text = _combat_status_text(session, enemy, alive_players, first_player_id)
+    text += f"\n\n▶️ Turno de <b>{first_name}</b>!"
+
+    # Só mostra botões se for a vez deste jogador
+    keyboard = _build_combat_keyboard(first_player_id, session["id"]) if first_player_id == user_id else None
+    if keyboard is None:
+        text += f"\n<i>(Aguarda a tua vez)</i>"
+
     await message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
 async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler de combate com suporte multiplayer por turnos."""
     query = update.callback_query
     chat_id = query.message.chat_id
     user_id = query.from_user.id
@@ -310,9 +377,19 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     players = get_session_players(session["id"])
-    player_ids = [p["telegram_id"] for p in players if p.get("is_alive")]
+    alive_players = [p for p in players if p.get("is_alive", 1)]
+    player_ids = [p["telegram_id"] for p in alive_players]
+
     if user_id not in player_ids:
         await query.answer("Não és jogador desta história!", show_alert=True)
+        return
+
+    # Verifica se é a vez deste jogador
+    current_turn_id = _get_combat_turn_player(context, session["id"])
+    if current_turn_id and current_turn_id != user_id:
+        current_char = get_character(current_turn_id)
+        name = current_char["name"] if current_char else "outro jogador"
+        await query.answer(f"É a vez de {name}!", show_alert=True)
         return
 
     await query.answer()
@@ -326,41 +403,45 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hp_atual = sp["hp_current"] if sp else char["hp_max"]
     mana_atual = sp["mana_current"] if sp else 0
 
+    from game.weather import apply_weather_to_stats
     stats = apply_weather_to_stats(
         {"atk": char["atk"], "def": char["def"], "agi": char["agi"], "mana": char["mana"]},
-        session["weather"], session["time_of_day"], char["race"]
+        session.get("weather", "sol"), session.get("time_of_day", "dia"), char["race"]
     )
 
     log_lines = []
     player_dmg = 0
     mana_spent = 0
 
-    # ── Fuga ─────────────────────────────────────────────────────────────────
+    # ── Fuga ──────────────────────────────────────────────────────────────────
     if action == "combat_flee":
         if enemy.get("is_boss") or enemy.get("is_miniboss"):
             log_lines.append("❌ Não consegues fugir de um boss!")
             enemy_hit = calculate_enemy_damage(enemy, char, session["current_turn"], session["difficulty"])
-            new_hp = hp_atual - enemy_hit["damage"]
+            new_hp = max(0, hp_atual - enemy_hit["damage"])
             update_player_hp(session["id"], user_id, new_hp, char["hp_max"])
-            log_lines.append(f"👹 <b>{enemy['name']}</b> contra-ataca — {enemy_hit['text']}")
+            log_lines.append(f"👹 <b>{enemy['name']}</b> pune a tua cobardia — {enemy_hit['text']}")
             context.chat_data["current_enemy"] = enemy
             if new_hp <= 0:
-                await query.edit_message_text(
-                    "\n".join(log_lines) + f"\n\n☠️ <b>{char['name']} foi derrotado!</b>",
-                    parse_mode=ParseMode.HTML
-                )
                 increment_stat(user_id, "total_deaths")
-                context.chat_data.pop("current_enemy", None)
-                return
-            text = _combat_status_text(user_id, session, enemy)
-            keyboard = _build_combat_keyboard(user_id, enemy, session["id"])
+                log_lines.append(f"☠️ <b>{char['name']} foi derrotado!</b>")
+            # Passa o turno
+            alive_players = [p for p in get_session_players(session["id"]) if p.get("is_alive", 1)]
+            next_id = _next_combat_turn(context, session["id"], alive_players)
+            next_char = get_character(next_id) if next_id else None
+            status = _combat_status_text(session, enemy, alive_players, next_id)
+            turn_line = f"\n\n▶️ Turno de <b>{next_char['name'] if next_char else '?'}</b>!" if next_id else ""
+            keyboard = _build_combat_keyboard(next_id, session["id"]) if next_id else None
             await query.edit_message_text(
-                "\n".join(log_lines) + f"\n\n{text}",
+                "\n".join(log_lines) + f"\n\n{status}{turn_line}",
                 reply_markup=keyboard, parse_mode=ParseMode.HTML
             )
             return
         else:
             context.chat_data.pop("current_enemy", None)
+            context.chat_data.pop(f"combat_turn_{session['id']}", None)
+            context.chat_data.pop(f"combat_order_{session['id']}", None)
+            context.chat_data.pop(f"combat_acted_{session['id']}", None)
             await query.edit_message_text(
                 f"🏃 <b>{char['name']}</b> fugiu do combate!\n\nA história continua...",
                 parse_mode=ParseMode.HTML
@@ -370,6 +451,7 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_story_over(session):
                 await _finish_story(update, context, session, players, query.message)
                 return
+            context.chat_data[f"just_defeated_{session['id']}"] = True
             result = await generate_turn(chat_id, session, players, f"Fugiu de {enemy['name']}", None)
             if result:
                 turn_summary = await _process_events(update, context, session, result, players, query.message)
@@ -378,14 +460,14 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _send_narration_msg(query.message, session, result, players, turn_summary=turn_summary)
             return
 
-    # ── Ataque básico ─────────────────────────────────────────────────────────
+    # ── Ataque básico ──────────────────────────────────────────────────────────
     if action == "combat_attack":
         dice = roll_dice()
         result = calculate_damage(stats["atk"], enemy.get("def", 5), dice)
         player_dmg = result["damage"]
         log_lines.append(f"⚔️ <b>{char['name']}</b> ataca — {result['text']}")
 
-    # ── Skill ─────────────────────────────────────────────────────────────────
+    # ── Skill ──────────────────────────────────────────────────────────────────
     elif action.startswith("combat_skill_"):
         skill_id = int(action.replace("combat_skill_", ""))
         skill = db_get("SELECT * FROM skills WHERE id=? AND telegram_id=?", (skill_id, user_id))
@@ -406,7 +488,7 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             player_dmg = result["damage"]
             log_lines.append(f"⚔️ <b>{char['name']}</b> ataca — {result['text']}")
 
-    # ── Feitiço ───────────────────────────────────────────────────────────────
+    # ── Feitiço ────────────────────────────────────────────────────────────────
     elif action.startswith("combat_spell_"):
         spell_id = int(action.replace("combat_spell_", ""))
         spell = db_get("SELECT * FROM spells WHERE id=? AND telegram_id=?", (spell_id, user_id))
@@ -425,7 +507,7 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Feitiço não encontrado.", show_alert=True)
             return
 
-    # ── Companheiro ───────────────────────────────────────────────────────────
+    # ── Companheiro ────────────────────────────────────────────────────────────
     elif action.startswith("combat_companion_"):
         comp_id = int(action.replace("combat_companion_", ""))
         comp = db_get("SELECT * FROM companions WHERE id=? AND telegram_id=?", (comp_id, user_id))
@@ -439,7 +521,7 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Companheiro não encontrado.", show_alert=True)
             return
 
-    # ── Aplica dano ao inimigo ────────────────────────────────────────────────
+    # ── Aplica dano ao inimigo ─────────────────────────────────────────────────
     enemy["hp"] = max(0, enemy.get("hp", 50) - player_dmg)
     add_session_stats(session["id"], user_id, damage=player_dmg)
     increment_stat(user_id, "total_damage", player_dmg)
@@ -448,43 +530,61 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db_run("UPDATE session_players SET mana_current=? WHERE session_id=? AND telegram_id=?",
                (max(0, mana_atual - mana_spent), session["id"], user_id))
 
-    # ── Inimigo derrotado ─────────────────────────────────────────────────────
+    # Marca que este jogador já agiu nesta ronda
+    acted = context.chat_data.get(f"combat_acted_{session['id']}", set())
+    acted.add(user_id)
+    context.chat_data[f"combat_acted_{session['id']}_set"] = acted
+
+    # ── Inimigo derrotado ──────────────────────────────────────────────────────
     if enemy["hp"] <= 0:
         context.chat_data.pop("current_enemy", None)
+        context.chat_data.pop(f"combat_turn_{session['id']}", None)
+        context.chat_data.pop(f"combat_order_{session['id']}", None)
+        context.chat_data.pop(f"combat_acted_{session['id']}_set", None)
+
         increment_stat(user_id, "total_kills")
         add_session_stats(session["id"], user_id, kills=1)
         if enemy.get("is_boss"):
             increment_stat(user_id, "boss_kills")
 
         diff = DIFFICULTIES.get(session["difficulty"], DIFFICULTIES["normal"])
-        xp_reward = int(random.randint(20, 50) * diff["xp_mult"])
-        gold_reward = int(random.randint(10, 30) * diff["gold_mult"])
-        xp_result = add_xp(user_id, xp_reward)
-        add_gold(user_id, gold_reward)
-        add_session_stats(session["id"], user_id, xp=xp_reward, gold=gold_reward)
+        # XP e ouro dividido por todos os jogadores vivos
+        n_alive = max(1, len(alive_players))
+        xp_total = int(random.randint(20, 50) * diff["xp_mult"])
+        gold_total = int(random.randint(10, 30) * diff["gold_mult"])
 
-        victory_text = "\n".join(log_lines)
-        reward_text = (
-            f"\n\n🏆 <b>Vitória!</b> <b>{enemy['name']}</b> derrotado!\n"
-            f"✨ +{xp_reward} XP | 💰 +{gold_reward} ouro"
+        reward_lines = [f"\n🏆 <b>Vitória!</b> <b>{enemy['name']}</b> derrotado!"]
+        for p in alive_players:
+            xp_share = max(5, xp_total // n_alive)
+            gold_share = max(1, gold_total // n_alive)
+            xp_result = add_xp(p["telegram_id"], xp_share)
+            add_gold(p["telegram_id"], gold_share)
+            add_session_stats(session["id"], p["telegram_id"], xp=xp_share, gold=gold_share)
+            p_char = get_character(p["telegram_id"])
+            reward_lines.append(f"  {p_char['name'] if p_char else '?'}: ✨+{xp_share} XP | 💰+{gold_share} ouro")
+            if xp_result.get("leveled_up"):
+                lvl = xp_result["new_level"]
+                keyboard_lvl = [[
+                    InlineKeyboardButton("❤️ +20 HP", callback_data="levelup_hp"),
+                    InlineKeyboardButton("⚔️ +3 ATK", callback_data="levelup_atk"),
+                    InlineKeyboardButton("🛡️ +2 DEF", callback_data="levelup_def"),
+                    InlineKeyboardButton("⚡ +2 AGI", callback_data="levelup_agi"),
+                    InlineKeyboardButton("💧 +20 MANA", callback_data="levelup_mana"),
+                ]]
+                try:
+                    await context.bot.send_message(
+                        p["telegram_id"],
+                        f"⭐ <b>LEVEL UP!</b> Chegaste ao nível {lvl}! Escolhe o teu bónus:",
+                        reply_markup=InlineKeyboardMarkup(keyboard_lvl),
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception:
+                    pass
+
+        await query.edit_message_text(
+            "\n".join(log_lines) + "\n".join(reward_lines),
+            parse_mode=ParseMode.HTML
         )
-
-        await query.edit_message_text(f"{victory_text}{reward_text}", parse_mode=ParseMode.HTML)
-
-        if xp_result.get("leveled_up"):
-            lvl = xp_result["new_level"]
-            keyboard_lvl = [[
-                InlineKeyboardButton("❤️ +20 HP", callback_data="levelup_hp"),
-                InlineKeyboardButton("⚔️ +3 ATK", callback_data="levelup_atk"),
-                InlineKeyboardButton("🛡️ +2 DEF", callback_data="levelup_def"),
-                InlineKeyboardButton("⚡ +2 AGI", callback_data="levelup_agi"),
-                InlineKeyboardButton("💧 +20 MANA", callback_data="levelup_mana"),
-            ]]
-            await query.message.reply_text(
-                f"⭐ <b>LEVEL UP!</b> Chegaste ao nível {lvl}! Escolhe o teu bónus:",
-                reply_markup=InlineKeyboardMarkup(keyboard_lvl),
-                parse_mode=ParseMode.HTML
-            )
 
         session = advance_turn(session["id"])
         players = get_session_players(session["id"])
@@ -493,6 +593,8 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         await query.message.reply_text("⏳ A continuar a história...")
+        # Bloqueia enemy_spawned no turno imediatamente após vitória
+        context.chat_data[f"just_defeated_{session['id']}"] = True
         result = await generate_turn(chat_id, session, players, f"Derrotou {enemy['name']}", None)
         if result:
             turn_summary = await _process_events(update, context, session, result, players, query.message)
@@ -501,12 +603,7 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _send_narration_msg(query.message, session, result, players, turn_summary=turn_summary)
         return
 
-    # ── Inimigo contra-ataca ──────────────────────────────────────────────────
-    enemy_hit = calculate_enemy_damage(enemy, char, session["current_turn"], session["difficulty"])
-    new_hp = hp_atual - enemy_hit["damage"]
-    update_player_hp(session["id"], user_id, new_hp, char["hp_max"])
-
-    # Enraivecimento
+    # ── Enraivecimento do boss ─────────────────────────────────────────────────
     hp_pct = enemy["hp"] / max(enemy.get("hp_max", enemy["hp"]), 1)
     if hp_pct <= 0.3 and not enemy.get("enraged"):
         enemy["enraged"] = True
@@ -514,26 +611,70 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log_lines.append(f"😡 <b>{enemy['name']}</b> ENFURECEU! ATK aumentado!")
     context.chat_data["current_enemy"] = enemy
 
-    log_lines.append(f"👹 <b>{enemy['name']}</b> contra-ataca — {enemy_hit['text']}")
+    # ── Próximo jogador na ronda ───────────────────────────────────────────────
+    alive_players = [p for p in get_session_players(session["id"]) if p.get("is_alive", 1)]
+    next_id = _next_combat_turn(context, session["id"], alive_players)
+    next_char = get_character(next_id) if next_id else None
 
-    # ── Jogador morreu ────────────────────────────────────────────────────────
-    if new_hp <= 0:
-        await query.edit_message_text(
-            "\n".join(log_lines) + f"\n\n☠️ <b>{char['name']} foi derrotado!</b>\nAlguém pode usar /revive.",
-            parse_mode=ParseMode.HTML
+    # Verifica se todos já agiram nesta ronda → inimigo contra-ataca
+    acted_set = context.chat_data.get(f"combat_acted_{session['id']}_set", set())
+    all_acted = all(p["telegram_id"] in acted_set for p in alive_players)
+
+    if all_acted:
+        # Reset da ronda — inimigo ataca um jogador aleatório
+        context.chat_data[f"combat_acted_{session['id']}_set"] = set()
+        target = random.choice(alive_players)
+        target_char = get_character(target["telegram_id"])
+        target_sp = db_get(
+            "SELECT hp_current FROM session_players WHERE session_id=? AND telegram_id=?",
+            (session["id"], target["telegram_id"])
         )
-        increment_stat(user_id, "total_deaths")
-        context.chat_data.pop("current_enemy", None)
-        return
+        target_hp = target_sp["hp_current"] if target_sp else target_char["hp_max"]
 
-    # ── Continua combate ──────────────────────────────────────────────────────
-    text = _combat_status_text(user_id, session, enemy)
-    keyboard = _build_combat_keyboard(user_id, enemy, session["id"])
+        enemy_hit = calculate_enemy_damage(enemy, target_char, session["current_turn"], session["difficulty"])
+        new_hp = max(0, target_hp - enemy_hit["damage"])
+        update_player_hp(session["id"], target["telegram_id"], new_hp, target_char["hp_max"])
+        log_lines.append(f"\n👹 <b>{enemy['name']}</b> ataca <b>{target_char['name']}</b> — {enemy_hit['text']}")
+
+        if new_hp <= 0:
+            log_lines.append(f"☠️ <b>{target_char['name']} foi derrotado!</b>")
+            increment_stat(target["telegram_id"], "total_deaths")
+            alive_players = [p for p in get_session_players(session["id"]) if p.get("is_alive", 1)]
+            if not alive_players:
+                context.chat_data.pop("current_enemy", None)
+                await query.edit_message_text(
+                    "\n".join(log_lines) + "\n\n💀 <b>Todos os heróis foram derrotados!</b>",
+                    parse_mode=ParseMode.HTML
+                )
+                return
+
+        # Recalcula próximo após possível morte
+        alive_players = [p for p in get_session_players(session["id"]) if p.get("is_alive", 1)]
+        next_id = _init_combat_turn(context, session["id"], alive_players)
+        next_char = get_character(next_id) if next_id else None
+
+    # Mostra painel atualizado
+    status = _combat_status_text(session, enemy, alive_players, next_id)
+    turn_line = f"\n\n▶️ Turno de <b>{next_char['name'] if next_char else '?'}</b>!"
+    keyboard = _build_combat_keyboard(next_id, session["id"]) if next_id else None
+
     await query.edit_message_text(
-        "\n".join(log_lines) + f"\n\n{text}",
+        "\n".join(log_lines) + f"\n\n{status}{turn_line}",
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
+
+    # Notifica o próximo jogador via DM se for diferente
+    if next_id and next_id != user_id:
+        try:
+            keyboard_dm = _build_combat_keyboard(next_id, session["id"])
+            await context.bot.send_message(
+                next_id,
+                f"⚔️ É a tua vez no combate contra <b>{enemy['name']}</b>!\nVolta ao grupo para atacar.",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass  # Jogador pode ter bloqueado o bot
 
 
 # ─── Processamento de eventos da IA ──────────────────────────────────────────
@@ -649,17 +790,22 @@ async def _process_events(update, context, session, result, players, message) ->
         )
 
     if events.get("enemy_spawned"):
-        enemy = events["enemy_spawned"]
-        enemy["hp_max"] = enemy["hp"]
-        context.chat_data["current_enemy"] = enemy
-        tag = "💀 BOSS" if enemy.get("is_boss") else ("⚠️ Mini-Boss" if enemy.get("is_miniboss") else "👹 Inimigo")
-        await message.reply_text(
-            f"{tag}: <b>{enemy['name']}</b>\n"
-            f"❤️ {enemy['hp']} HP | ⚔️ {enemy['atk']} ATK | 🛡️ {enemy['def']} DEF\n"
-            f"🔥 Elemento: {enemy.get('element','nenhum')} | 🎯 Fraqueza: {enemy.get('weakness','nenhuma')}\n\n"
-            f"⚔️ <i>Escolhe uma ação para iniciar o combate!</i>",
-            parse_mode=ParseMode.HTML
-        )
+        # Ignora enemy_spawned no turno imediatamente após derrota de inimigo
+        just_defeated = context.chat_data.pop(f"just_defeated_{session['id']}", False)
+        if just_defeated:
+            logger.info("enemy_spawned ignorado: turno pós-vitória")
+        else:
+            enemy = events["enemy_spawned"]
+            enemy["hp_max"] = enemy["hp"]
+            context.chat_data["current_enemy"] = enemy
+            tag = "💀 BOSS" if enemy.get("is_boss") else ("⚠️ Mini-Boss" if enemy.get("is_miniboss") else "👹 Inimigo")
+            await message.reply_text(
+                f"{tag}: <b>{enemy['name']}</b>\n"
+                f"❤️ {enemy['hp']} HP | ⚔️ {enemy['atk']} ATK | 🛡️ {enemy['def']} DEF\n"
+                f"🔥 Elemento: {enemy.get('element','nenhum')} | 🎯 Fraqueza: {enemy.get('weakness','nenhuma')}\n\n"
+                f"⚔️ <i>Escolhe uma ação para iniciar o combate!</i>",
+                parse_mode=ParseMode.HTML
+            )
 
     if events.get("companion_available"):
         comp = events["companion_available"]
