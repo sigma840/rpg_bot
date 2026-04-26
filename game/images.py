@@ -12,7 +12,7 @@ POLLINATIONS_BASE = "https://image.pollinations.ai/prompt/{prompt}?width=768&hei
 # Lock criado de forma lazy para evitar problemas com event loop no arranque
 _request_lock: asyncio.Lock | None = None
 _last_request_time: float = 0.0
-_MIN_INTERVAL = 8.0
+_MIN_INTERVAL = 3.0
 
 
 def _get_lock() -> asyncio.Lock:
