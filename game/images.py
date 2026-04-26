@@ -25,7 +25,7 @@ def _get_lock() -> asyncio.Lock:
 
 # Prefixo fixo para garantir estilo fantasy RPG em todas as imagens de cena
 FANTASY_STYLE_PREFIX = (
-    "epic fantasy RPG scene, medieval fantasy art style, "
+    "epic magical medieval scene, medieval fantasy art style, "
     "digital painting, dramatic lighting, highly detailed, "
     "no modern elements, no contemporary buildings, no technology, "
 )
