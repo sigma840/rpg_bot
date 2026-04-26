@@ -1,5 +1,6 @@
 import logging
 import random
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -198,10 +199,10 @@ async def callback_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         result["events"] = {"xp_gained": random.randint(5, 15)}
 
-    await _process_events(update, context, session, result, players, query.message)
+    turn_summary = await _process_events(update, context, session, result, players, query.message)
     update_story_summary(session["id"], result["narration"])
     session = db_get("SELECT * FROM sessions WHERE id=?", (session["id"],))
-    await _send_narration_msg(query.message, session, result, players)
+    await _send_narration_msg(query.message, session, result, players, turn_summary=turn_summary)
 
 
 # ─── MINI-SISTEMA DE COMBATE ──────────────────────────────────────────────────
@@ -371,10 +372,10 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             result = await generate_turn(chat_id, session, players, f"Fugiu de {enemy['name']}", None)
             if result:
-                await _process_events(update, context, session, result, players, query.message)
+                turn_summary = await _process_events(update, context, session, result, players, query.message)
                 update_story_summary(session["id"], result["narration"])
                 session = db_get("SELECT * FROM sessions WHERE id=?", (session["id"],))
-                await _send_narration_msg(query.message, session, result, players)
+                await _send_narration_msg(query.message, session, result, players, turn_summary=turn_summary)
             return
 
     # ── Ataque básico ─────────────────────────────────────────────────────────
@@ -494,10 +495,10 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("⏳ A continuar a história...")
         result = await generate_turn(chat_id, session, players, f"Derrotou {enemy['name']}", None)
         if result:
-            await _process_events(update, context, session, result, players, query.message)
+            turn_summary = await _process_events(update, context, session, result, players, query.message)
             update_story_summary(session["id"], result["narration"])
             session = db_get("SELECT * FROM sessions WHERE id=?", (session["id"],))
-            await _send_narration_msg(query.message, session, result, players)
+            await _send_narration_msg(query.message, session, result, players, turn_summary=turn_summary)
         return
 
     # ── Inimigo contra-ataca ──────────────────────────────────────────────────
@@ -536,22 +537,26 @@ async def callback_combat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─── Processamento de eventos da IA ──────────────────────────────────────────
-async def _process_events(update, context, session, result, players, message):
+async def _process_events(update, context, session, result, players, message) -> str:
+    """Processa eventos e retorna um resumo de status para mostrar ao jogador."""
     events = result.get("events", {})
     if not events:
-        return
+        return ""
 
     current = get_current_player(session)
     if not current:
-        return
+        return ""
     tid = current["telegram_id"]
 
+    summary = []  # linhas do resumo de turno
     event_effects = get_active_event_effects()
     if events.get("xp_gained", 0) > 0:
         xp = int(events["xp_gained"] * event_effects["xp_mult"])
         xp_result = add_xp(tid, xp)
+        summary.append(f"✨ +{xp} XP")
         if xp_result.get("leveled_up"):
             lvl = xp_result["new_level"]
+            summary.append(f"⭐ LEVEL UP! Nível {lvl}")
             keyboard = [[
                 InlineKeyboardButton("❤️ +20 HP", callback_data="levelup_hp"),
                 InlineKeyboardButton("⚔️ +3 ATK", callback_data="levelup_atk"),
@@ -570,6 +575,26 @@ async def _process_events(update, context, session, result, players, message):
         gold = int(events["gold_gained"] * event_effects["gold_mult"])
         add_gold(tid, gold)
         add_session_stats(session["id"], tid, gold=gold)
+        summary.append(f"💰 +{gold} ouro")
+
+    if events.get("gold_spent", 0) > 0:
+        gold_cost = int(events["gold_spent"])
+        char_check = get_character(tid)
+        if char_check and char_check["gold"] >= gold_cost:
+            add_gold(tid, -gold_cost)
+            summary.append(f"💸 -{gold_cost} ouro (compra)")
+        else:
+            summary.append(f"❌ Ouro insuficiente para a compra ({gold_cost})")
+
+    if events.get("hp_lost", 0) > 0:
+        hp_dmg = int(events["hp_lost"])
+        char_hp = get_character(tid)
+        sp_hp = db_get("SELECT hp_current FROM session_players WHERE session_id=? AND telegram_id=?",
+                       (session["id"], tid))
+        if sp_hp and char_hp:
+            new_hp = max(0, sp_hp["hp_current"] - hp_dmg)
+            update_player_hp(session["id"], tid, new_hp, char_hp["hp_max"])
+            summary.append(f"💔 -{hp_dmg} HP ({new_hp}/{char_hp['hp_max']})")
 
     if events.get("item_found"):
         item = events["item_found"]
@@ -577,8 +602,10 @@ async def _process_events(update, context, session, result, players, message):
         if result_id == -1:
             await message.reply_text(f"💎 Encontraste <b>{item['name']}</b> mas já tens o máximo de itens lendários!")
         else:
+            verb = "comprou" if events.get("gold_spent", 0) > 0 else "encontrou"
+            summary.append(f"🎁 {item['name']} adicionado ao inventário")
             await message.reply_text(
-                f"🎁 <b>{current.get('char_name','?')}</b> encontrou: "
+                f"🎁 <b>{current.get('char_name','?')}</b> {verb}: "
                 f"<b>{item['name']}</b> ({item.get('rarity','comum')})\n<i>{item.get('description','')[:80]}</i>",
                 parse_mode=ParseMode.HTML
             )
@@ -586,6 +613,7 @@ async def _process_events(update, context, session, result, players, message):
     if events.get("weapon_found"):
         weapon = events["weapon_found"]
         add_weapon(tid, weapon, session["id"])
+        summary.append(f"⚔️ {weapon['name']} adicionada ao inventário")
         await message.reply_text(
             f"⚔️ <b>{current.get('char_name','?')}</b> encontrou a arma: <b>{weapon['name']}</b> ({weapon.get('rarity','comum')})\n"
             f"<i>{weapon.get('lore','')[:80]}</i>",
@@ -670,13 +698,15 @@ async def _process_events(update, context, session, result, players, message):
     if events.get("time_change"):
         update_session_weather(session["id"], time_of_day=events["time_change"])
 
+    return " | ".join(summary)
+
 
 async def _send_narration(update, context, session, result, players, is_prologue=False):
     msg = update.message
     await _send_narration_msg(msg, session, result, players, is_prologue)
 
 
-async def _send_narration_msg(message, session, result, players, is_prologue=False):
+async def _send_narration_msg(message, session, result, players, is_prologue=False, turn_summary: str = ""):
     narration = result.get("narration", "")
     options = result.get("options", [])
     image_prompt = result.get("image_prompt", "")
@@ -688,7 +718,9 @@ async def _send_narration_msg(message, session, result, players, is_prologue=Fal
     full_text = f"{turn_text}\n{weather_line}\n\n{narration}"
 
     if current and not is_prologue:
-        full_text += f"\n\n\U0001f3ae \u00c9 a vez de <b>{current.get('char_name','?')}</b>"
+        full_text += f"\n\n\U0001f3ae É a vez de <b>{current.get('char_name','?')}</b>"
+    if turn_summary and not is_prologue:
+        full_text += f"\n\n<code>[ {turn_summary} ]</code>"
 
     keyboard = []
     if options and current:
