@@ -64,7 +64,7 @@ REGRAS IMPORTANTES:
 - gold_gained entre 0 e 15 ocasionalmente
 - Varia MUITO os eventos: tesouros, NPCs, armadilhas, ruinas, segredos, comerciantes, estalagens, festivais. enemy_spawned APENAS 1 em cada 4 turnos no maximo
 - Quando ha inimigo descreve apenas o encontro — o combate e resolvido pelo sistema do jogo
-- image_prompt: descricao visual da cena em ingles, max 80 palavras
+- image_prompt: descricao visual da cena em ingles, max 120 palavras. OBRIGATORIO incluir: aparencia visual de cada jogador presente (raca, classe, descricao fisica/equipamento do campo avatar), companheiros domados se presentes (tipo de animal, aparencia), e o contexto preciso da cena (local, atmosfera, acao em curso, clima, hora do dia). A imagem deve representar fielmente o que esta a acontecer na narration.
 - options: sao SEMPRE acoes fisicas no mundo (ex: Explorar a floresta, Falar com o mercador, Examinar o altar). NUNCA colocar Aceitar/Recusar nas options — isso e tratado automaticamente pelo sistema de eventos
 
 Estrutura obrigatoria:
@@ -125,9 +125,21 @@ async def generate_turn(chat_id: int, session: dict, players: list, action_taken
     if not _check_rate_limit(chat_id):
         return None
 
-    players_info = [{"name": p.get("char_name","?"), "race": p.get("race","?"), "class": p.get("class","?"),
-                     "hp": f"{p.get('hp_current',0)}/{p.get('hp_max',100)}", "alive": bool(p.get("is_alive",1)),
-                     "skills": p.get("skills",[]), "avatar": p.get("avatar_desc","")} for p in players]
+    from game.progression import get_companions
+    players_info = []
+    for p in players:
+        companions = get_companions(p.get("telegram_id", 0))
+        companions_info = [{"name": c["name"], "animal_type": c["animal_type"], "description": c.get("description", "")} for c in companions]
+        players_info.append({
+            "name": p.get("char_name", "?"),
+            "race": p.get("race", "?"),
+            "class": p.get("class", "?"),
+            "hp": f"{p.get('hp_current', 0)}/{p.get('hp_max', 100)}",
+            "alive": bool(p.get("is_alive", 1)),
+            "skills": p.get("skills", []),
+            "avatar": p.get("avatar_desc", ""),
+            "companions": companions_info,
+        })
 
     prompt = f"""{NARRATOR_SYSTEM}
 
@@ -151,7 +163,15 @@ async def generate_prologue(chat_id: int, session: dict, players: list) -> dict 
     if not _check_rate_limit(chat_id):
         return None
 
-    players_info = [f"{p.get('char_name','?')} ({p.get('race','?')} {p.get('class','?')}): {p.get('avatar_desc','')}" for p in players]
+    from game.progression import get_companions
+    players_info = []
+    for p in players:
+        companions = get_companions(p.get("telegram_id", 0))
+        comp_str = ", ".join([f"{c['name']} ({c['animal_type']})" for c in companions]) if companions else ""
+        entry = f"{p.get('char_name','?')} ({p.get('race','?')} {p.get('class','?')}): {p.get('avatar_desc','')}"
+        if comp_str:
+            entry += f" | Companheiros: {comp_str}"
+        players_info.append(entry)
 
     prompt = f"""{NARRATOR_SYSTEM}
 
