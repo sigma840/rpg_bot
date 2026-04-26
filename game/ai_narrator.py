@@ -83,7 +83,7 @@ REGRAS CRITICAS DE VARIEDADE — LER COM ATENCAO:
 - xp_gained SEMPRE entre 5 e 20
 - gold_gained entre 0 e 15 ocasionalmente
 - options: SEMPRE 3-4 acoes DIFERENTES entre si e relevantes para a cena atual. NUNCA "Seguir em frente" e "Continuar o caminho" juntos — sao a mesma coisa. Cada opcao deve ser unica e interessante: uma pode ser agressiva, outra diplomatica, outra furtiva, outra magica.
-- image_prompt: descricao visual da cena em ingles, max 120 palavras. OBRIGATORIO incluir aparencia de cada jogador (raca, classe, avatar_desc/equipamento), companheiros domados se existirem (animal, aparencia), e contexto preciso da cena (local, atmosfera, acao em curso, clima, hora do dia).
+- image_prompt: descricao visual da cena em ingles, max 80 palavras. Incluir aparencia dos jogadores, contexto da cena. APENAS cenarios medievais de fantasia (florestas, castelos, tavernas, masmorras, montanhas, ruinas magicas). PROIBIDO elementos modernos ou contemporaneos.
 
 Estrutura obrigatoria:
 {
