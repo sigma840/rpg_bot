@@ -23,9 +23,27 @@ def _get_lock() -> asyncio.Lock:
     return _request_lock
 
 
-async def generate_image(prompt: str, seed: int = 42) -> bytes | None:
+# Prefixo fixo para garantir estilo fantasy RPG em todas as imagens de cena
+FANTASY_STYLE_PREFIX = (
+    "epic fantasy RPG scene, medieval fantasy art style, "
+    "digital painting, dramatic lighting, highly detailed, "
+    "no modern elements, no contemporary buildings, no technology, "
+)
+
+# Sufixo para reforçar o estilo
+FANTASY_STYLE_SUFFIX = (
+    ", fantasy oil painting, artstation quality, "
+    "epic composition, magical atmosphere"
+)
+
+
+async def generate_image(prompt: str, seed: int = 42, force_fantasy: bool = True) -> bytes | None:
     if not IMAGE_ENABLED:
         return None
+    
+    # Força estilo fantasy em imagens de cena (não em avatares que já têm o seu próprio prompt)
+    if force_fantasy:
+        prompt = FANTASY_STYLE_PREFIX + prompt + FANTASY_STYLE_SUFFIX
 
     global _last_request_time
 
@@ -77,4 +95,4 @@ async def generate_avatar_image(description: str, race: str, char_class: str, te
         "detailed fantasy equipment, dramatic lighting, epic art style, "
         "high quality digital painting, vibrant colors, hero pose"
     )
-    return await generate_image(prompt, seed=telegram_id % 99999)
+    return await generate_image(prompt, seed=telegram_id % 99999, force_fantasy=False)
