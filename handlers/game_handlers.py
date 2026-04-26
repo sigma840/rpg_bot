@@ -729,20 +729,39 @@ async def _send_narration_msg(message, session, result, players, is_prologue=Fal
 
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
-    # Envia texto PRIMEIRO para nao bloquear o jogo
+    # Gera imagem primeiro; envia narração e imagem juntas
+    if image_prompt:
+        try:
+            img_bytes = await generate_image(image_prompt, seed=session.get("current_turn", 1))
+            if img_bytes:
+                try:
+                    # Telegram limita captions a 1024 chars — se o texto for maior envia separado
+                    if len(full_text) <= 1024:
+                        await message.reply_photo(photo=img_bytes, caption=full_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                    else:
+                        await message.reply_photo(photo=img_bytes)
+                        await message.reply_text(full_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                except Exception as e:
+                    logger.warning("Erro ao enviar foto com caption: %s", e)
+                    # Fallback: envia foto e texto separados
+                    await message.reply_photo(photo=img_bytes)
+                    await message.reply_text(full_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                return
+            else:
+                logger.warning("Imagem nao gerada, enviando apenas narração.")
+        except Exception as e:
+            logger.warning("Erro ao gerar imagem, enviando apenas narração: %s", e)
+
+    # Sem imagem: envia apenas texto
     try:
         await message.reply_text(full_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.error("Erro ao enviar narracao: %s", e)
         await message.reply_text(narration, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-    # Envia imagem em background sem bloquear
-    if image_prompt:
-        asyncio.create_task(_send_image_async(message, image_prompt, session.get("current_turn", 1)))
-
 
 async def _send_image_async(message, image_prompt: str, seed: int):
-    """Gera e envia imagem de forma assincrona sem bloquear o jogo."""
+    """Mantido por compatibilidade — já não é usado no fluxo principal."""
     try:
         img_bytes = await generate_image(image_prompt, seed=seed)
         if img_bytes:
