@@ -7,23 +7,29 @@ from config import IMAGE_ENABLED
 
 logger = logging.getLogger(__name__)
 
-# Usa o endpoint de API oficial do Pollinations que é mais estável
-POLLINATIONS_BASE = "https://image.pollinations.ai/prompt/{prompt}?width=768&height=432&nologo=true&seed={seed}&model=flux"
+POLLINATIONS_BASE = "https://image.pollinations.ai/prompt/{prompt}?width=768&height=432&nologo=true&seed={seed}&model=flux&referrer=rpgbot"
 
-_request_lock = asyncio.Lock()
+# Lock criado de forma lazy para evitar problemas com event loop no arranque
+_request_lock: asyncio.Lock | None = None
 _last_request_time: float = 0.0
-_MIN_INTERVAL = 6.0  # segundos mínimos entre pedidos
+_MIN_INTERVAL = 8.0
+
+
+def _get_lock() -> asyncio.Lock:
+    """Cria o lock de forma lazy dentro do event loop correto."""
+    global _request_lock
+    if _request_lock is None:
+        _request_lock = asyncio.Lock()
+    return _request_lock
 
 
 async def generate_image(prompt: str, seed: int = 42) -> bytes | None:
-    """Gera imagem via Pollinations.AI com fila serializada para evitar 429."""
     if not IMAGE_ENABLED:
         return None
 
     global _last_request_time
 
-    async with _request_lock:
-        # Espera o intervalo mínimo
+    async with _get_lock():
         now = time.monotonic()
         elapsed = now - _last_request_time
         if elapsed < _MIN_INTERVAL:
@@ -32,29 +38,30 @@ async def generate_image(prompt: str, seed: int = 42) -> bytes | None:
         encoded = quote(prompt[:250])
         url = POLLINATIONS_BASE.format(prompt=encoded, seed=abs(seed) % 99999)
 
-        for tentativa in range(2):
+        for tentativa in range(3):
             try:
                 _last_request_time = time.monotonic()
-                timeout = aiohttp.ClientTimeout(total=50, connect=10)
-                async with aiohttp.ClientSession() as session:
+                timeout = aiohttp.ClientTimeout(total=60, connect=15)
+                headers = {"User-Agent": "RPGBot/1.0"}
+                async with aiohttp.ClientSession(headers=headers) as session:
                     async with session.get(url, timeout=timeout) as resp:
                         if resp.status == 200:
                             data = await resp.read()
-                            if len(data) > 5000:  # imagem real tem pelo menos 5KB
+                            if len(data) > 5000:
                                 return data
-                            logger.warning("Pollinations: resposta muito pequena (%d bytes)", len(data))
+                            logger.warning("Pollinations: resposta pequena (%d bytes)", len(data))
                             return None
                         elif resp.status == 429:
-                            logger.warning("Pollinations 429 na tentativa %d", tentativa + 1)
-                            await asyncio.sleep(10)
+                            wait = 15 * (tentativa + 1)
+                            logger.warning("Pollinations 429 — aguardar %ds", wait)
+                            await asyncio.sleep(wait)
                             continue
                         else:
                             logger.warning("Pollinations status %s", resp.status)
                             return None
             except asyncio.TimeoutError:
-                logger.warning("Pollinations timeout (tentativa %d)", tentativa + 1)
-                if tentativa == 0:
-                    await asyncio.sleep(3)
+                logger.warning("Pollinations timeout (tentativa %d/3)", tentativa + 1)
+                await asyncio.sleep(5)
                 continue
             except Exception as e:
                 logger.error("Erro ao gerar imagem: %s", e)
