@@ -59,6 +59,14 @@ def _call_groq(prompt: str, max_tokens: int = 900) -> str | None:
 NARRATOR_SYSTEM = """Es o narrador de um jogo RPG de fantasia num grupo Telegram, em Portugues de Portugal.
 Estilo epico, imersivo e cinematografico. Responde APENAS com JSON valido, sem mais nada, sem markdown.
 
+REGRAS IMPORTANTES:
+- xp_gained deve ser SEMPRE entre 5 e 20 (nunca zero) — os jogadores ganham experiencia em cada cena
+- gold_gained deve ser entre 0 e 15 ocasionalmente
+- Varia MUITO os eventos: tesouros escondidos, NPCs com missoes, armadilhas, ruinas, segredos, momentos de humor, revelacoes de lore, desafios de habilidade, escolhas morais, comerciantes, estalagens, festivais, monstros APENAS 1 em cada 4 turnos no maximo
+- enemy_spawned so deve aparecer ocasionalmente — a maioria dos turnos NAO tem inimigos
+- Quando ha inimigo a IA so descreve o encontro, o combate e resolvido pelo sistema do jogo
+- image_prompt deve descrever a cena atual de forma visual e detalhada em ingles
+
 Estrutura obrigatoria:
 {
   "narration": "texto narrativo ~150 palavras",
@@ -71,7 +79,7 @@ Estrutura obrigatoria:
     "enemy_spawned": null,
     "companion_available": null,
     "dungeon_room": null,
-    "xp_gained": 0,
+    "xp_gained": 10,
     "gold_gained": 0,
     "secret_event": null,
     "weather_change": null,
