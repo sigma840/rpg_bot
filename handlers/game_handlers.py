@@ -682,13 +682,13 @@ async def _send_narration_msg(message, session, result, players, is_prologue=Fal
     image_prompt = result.get("image_prompt", "")
 
     current = get_current_player(session)
-    turn_text = f"📖 <b>Turno {session['current_turn']}/20</b>" if not is_prologue else "📖 <b>Prólogo</b>"
+    turn_text = f"\U0001f4d6 <b>Turno {session['current_turn']}/20</b>" if not is_prologue else "\U0001f4d6 <b>Pr\u00f3logo</b>"
     weather_line = format_weather_status(session.get("weather", "sol"), session.get("time_of_day", "dia"))
 
     full_text = f"{turn_text}\n{weather_line}\n\n{narration}"
 
     if current and not is_prologue:
-        full_text += f"\n\n🎮 É a vez de <b>{current.get('char_name','?')}</b>"
+        full_text += f"\n\n\U0001f3ae \u00c9 a vez de <b>{current.get('char_name','?')}</b>"
 
     keyboard = []
     if options and current:
@@ -697,20 +697,26 @@ async def _send_narration_msg(message, session, result, players, is_prologue=Fal
 
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
-    # Imagem separada antes do texto
-    if image_prompt:
-        try:
-            img_bytes = await generate_image(image_prompt, seed=session.get("current_turn", 1))
-            if img_bytes:
-                await message.reply_photo(photo=img_bytes)
-        except Exception as e:
-            logger.warning("Erro ao gerar imagem do turno: %s", e)
-
+    # Envia texto PRIMEIRO para nao bloquear o jogo
     try:
         await message.reply_text(full_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     except Exception as e:
-        logger.error("Erro ao enviar narração: %s", e)
+        logger.error("Erro ao enviar narracao: %s", e)
         await message.reply_text(narration, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    # Envia imagem em background sem bloquear
+    if image_prompt:
+        asyncio.create_task(_send_image_async(message, image_prompt, session.get("current_turn", 1)))
+
+
+async def _send_image_async(message, image_prompt: str, seed: int):
+    """Gera e envia imagem de forma assincrona sem bloquear o jogo."""
+    try:
+        img_bytes = await generate_image(image_prompt, seed=seed)
+        if img_bytes:
+            await message.reply_photo(photo=img_bytes)
+    except Exception as e:
+        logger.warning("Erro ao enviar imagem async: %s", e)
 
 
 async def _finish_story(update, context, session, players, message):
