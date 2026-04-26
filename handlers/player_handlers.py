@@ -7,7 +7,7 @@ from config import RACES, CLASSES, ACHIEVEMENTS, OWNER_ID
 from db.database import db_get, db_all
 from game.player import (get_or_create_player, get_character, create_character,
                           get_character_sheet, get_leaderboard_global, set_active_title,
-                          check_achievements)
+                          check_achievements, update_avatar_url)
 from game.inventory import format_inventory_text, get_weapons
 from game.progression import format_skills_text, format_companions_text, get_skills, get_spells
 from game.images import generate_avatar_image
@@ -167,6 +167,9 @@ async def received_avatar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=_char_created_text(char),
                 parse_mode=ParseMode.HTML
             )
+            # Guarda o file_id do avatar para usar no /status
+            if msg.photo:
+                update_avatar_url(user.id, msg.photo[-1].file_id)
         else:
             await update.message.reply_text(_char_created_text(char), parse_mode=ParseMode.HTML)
     except Exception as e:
