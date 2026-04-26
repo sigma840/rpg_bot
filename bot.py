@@ -20,7 +20,7 @@ from handlers.player_handlers import (
 from handlers.game_handlers import (
     cmd_new_game, cmd_join, cmd_begin, cmd_revive, cmd_alliance,
     cmd_betray, cmd_history, cmd_weather,
-    callback_difficulty, callback_action,
+    callback_difficulty, callback_action, callback_combat,
     callback_levelup, callback_skill_accept, callback_skill_reject,
     callback_spell_accept, callback_spell_reject,
     callback_tame, callback_tame_ignore,
@@ -146,6 +146,7 @@ def main():
     # ─── Callbacks Inline ─────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(callback_difficulty,    pattern="^diff_"))
     app.add_handler(CallbackQueryHandler(callback_action,        pattern="^action_"))
+    app.add_handler(CallbackQueryHandler(callback_combat,        pattern="^combat_"))
     app.add_handler(CallbackQueryHandler(callback_levelup,       pattern="^levelup_"))
     app.add_handler(CallbackQueryHandler(callback_skill_accept,  pattern="^skill_accept_"))
     app.add_handler(CallbackQueryHandler(callback_skill_reject,  pattern="^skill_reject$"))
